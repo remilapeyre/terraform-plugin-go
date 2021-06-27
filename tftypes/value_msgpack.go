@@ -126,7 +126,7 @@ func msgpackUnmarshal(dec *msgpack.Decoder, typ Type, path *AttributePath) (Valu
 	case typ.Is(Tuple{}):
 		return msgpackUnmarshalTuple(dec, typ.(Tuple).ElementTypes, path)
 	case typ.Is(Object{}):
-		return msgpackUnmarshalObject(dec, typ.(Object).AttributeTypes, path)
+		return msgpackUnmarshalObject(dec, typ.(Object).AttributeTypes, typ.(Object).OptionalAttributes, path)
 	}
 	return Value{}, path.NewErrorf("unsupported type %s", typ.String())
 }
@@ -279,7 +279,7 @@ func msgpackUnmarshalTuple(dec *msgpack.Decoder, types []Type, path *AttributePa
 	}, vals), nil
 }
 
-func msgpackUnmarshalObject(dec *msgpack.Decoder, types map[string]Type, path *AttributePath) (Value, error) {
+func msgpackUnmarshalObject(dec *msgpack.Decoder, types map[string]Type, optionalAttrs map[string]struct{}, path *AttributePath) (Value, error) {
 	length, err := dec.DecodeMapLen()
 	if err != nil {
 		return Value{}, path.NewErrorf("error decoding object length: %w", err)
@@ -289,11 +289,13 @@ func msgpackUnmarshalObject(dec *msgpack.Decoder, types map[string]Type, path *A
 	case length < 0:
 		return NewValue(Object{
 			AttributeTypes: types,
+			OptionalAttributes: optionalAttrs,
 		}, nil), nil
 	case length == 0:
 		return NewValue(Object{
 			// no attributes means no types
 			AttributeTypes: map[string]Type{},
+			OptionalAttributes: map[string]struct{}{},
 		}, map[string]Value{}), nil
 	case length != len(types):
 		return Value{}, path.NewErrorf("error decoding object; expected %d attributes, got %d", len(types), length)
@@ -303,6 +305,9 @@ func msgpackUnmarshalObject(dec *msgpack.Decoder, types map[string]Type, path *A
 	for i := 0; i < length; i++ {
 		key, err := dec.DecodeString()
 		if err != nil {
+			if err.Error() == "EOF" {
+				break
+			}
 			return Value{}, path.NewErrorf("error decoding object key: %w", err)
 		}
 		typ, exists := types[key]
@@ -319,6 +324,7 @@ func msgpackUnmarshalObject(dec *msgpack.Decoder, types map[string]Type, path *A
 
 	return NewValue(Object{
 		AttributeTypes: types,
+		OptionalAttributes: optionalAttrs,
 	}, vals), nil
 }
 
@@ -552,6 +558,7 @@ func marshalMsgPackObject(val Value, typ Type, p *AttributePath, enc *msgpack.En
 		return unexpectedValueTypeError(p, o, val.value, typ)
 	}
 	types := typ.(Object).AttributeTypes
+	optionalAttributes := typ.(Object).OptionalAttributes
 	keys := make([]string, 0, len(types))
 	for k := range types {
 		keys = append(keys, k)
@@ -565,6 +572,9 @@ func marshalMsgPackObject(val Value, typ Type, p *AttributePath, enc *msgpack.En
 		ty := types[k]
 		v, ok := o[k]
 		if !ok {
+			if _, optional := optionalAttributes[k]; optional {
+				continue
+			}
 			return p.WithAttributeName(k).NewErrorf("no value set")
 		}
 		err := marshalMsgPack(NewValue(String, k), String, p.WithAttributeName(k), enc)

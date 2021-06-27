@@ -57,7 +57,7 @@ func jsonUnmarshal(buf []byte, typ Type, p *AttributePath) (Value, error) {
 	case typ.Is(Tuple{}):
 		return jsonUnmarshalTuple(buf, typ.(Tuple).ElementTypes, p)
 	case typ.Is(Object{}):
-		return jsonUnmarshalObject(buf, typ.(Object).AttributeTypes, p)
+		return jsonUnmarshalObject(buf, typ.(Object).AttributeTypes, typ.(Object).OptionalAttributes, p)
 	}
 	return Value{}, p.NewErrorf("unknown type %s", typ)
 }
@@ -422,7 +422,7 @@ func jsonUnmarshalTuple(buf []byte, elementTypes []Type, p *AttributePath) (Valu
 	}, vals), nil
 }
 
-func jsonUnmarshalObject(buf []byte, attrTypes map[string]Type, p *AttributePath) (Value, error) {
+func jsonUnmarshalObject(buf []byte, attrTypes map[string]Type, optionalAttrs map[string]struct{}, p *AttributePath) (Value, error) {
 	dec := jsonByteDecoder(buf)
 
 	tok, err := dec.Token()
@@ -479,5 +479,6 @@ func jsonUnmarshalObject(buf []byte, attrTypes map[string]Type, p *AttributePath
 
 	return NewValue(Object{
 		AttributeTypes: attrTypes,
+		OptionalAttributes: optionalAttrs,
 	}, vals), nil
 }
